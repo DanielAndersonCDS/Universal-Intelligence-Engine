@@ -1,0 +1,12 @@
+{
+  "id": "bloomberg_blue",
+  "name": "Bloomberg Blue",
+  "description": "Deep navy launchpad with blue accents",
+  "font": { "family": "Consolas, 'Cascadia Mono', 'DejaVu Sans Mono', 'Courier New', monospace", "size": 10 },
+  "colors": {
+    "bg": "#07101C", "panel": "#0C1A2D", "panel_alt": "#12253D", "header_bg": "#0A2540", "border": "#1F3B5C",
+    "text": "#DCE6F2", "text_dim": "#7F93AB", "accent": "#2F9BFF", "accent_hover": "#5CB3FF", "accent_text": "#041320",
+    "positive": "#2ECC8F", "negative": "#FF5C5C", "warning": "#FFB000", "info": "#FB8B1E",
+    "selection": "#18487A", "selection_text": "#FFFFFF", "input_bg": "#081423"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "bloomberg_terminal",
+  "name": "Bloomberg Terminal",
+  "description": "Classic black and amber terminal",
+  "font": { "family": "Consolas, 'Cascadia Mono', 'DejaVu Sans Mono', 'Courier New', monospace", "size": 10 },
+  "colors": {
+    "bg": "#000000", "panel": "#0B0B0B", "panel_alt": "#151515", "header_bg": "#1A1100", "border": "#3A2A10",
+    "text": "#E8E8E8", "text_dim": "#8C8C8C", "accent": "#FB8B1E", "accent_hover": "#FFA64D", "accent_text": "#000000",
+    "positive": "#00D26A", "negative": "#FF4D4D", "warning": "#FFD500", "info": "#3AA0FF",
+    "selection": "#5A3300", "selection_text": "#FFFFFF", "input_bg": "#050505"
+  }
+}

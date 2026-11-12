@@ -1,0 +1,5 @@
+dataset:
+  label: churn
+columns:
+  user_id: {role: id}
+  signup_notes: {role: ignore}

@@ -1,0 +1,12 @@
+{
+  "id": "bloomberg_paper",
+  "name": "Bloomberg Paper",
+  "description": "Light workspace with orange accents",
+  "font": { "family": "Consolas, 'Cascadia Mono', 'DejaVu Sans Mono', 'Courier New', monospace", "size": 10 },
+  "colors": {
+    "bg": "#EDEFF2", "panel": "#FFFFFF", "panel_alt": "#F5F6F8", "header_bg": "#E1E5EA", "border": "#C3CAD3",
+    "text": "#1A1D21", "text_dim": "#5F6B78", "accent": "#E8590C", "accent_hover": "#FF7A2F", "accent_text": "#FFFFFF",
+    "positive": "#0B8F4D", "negative": "#C92A2A", "warning": "#B7791F", "info": "#1C6DD0",
+    "selection": "#FFD8BF", "selection_text": "#000000", "input_bg": "#FFFFFF"
+  }
+}

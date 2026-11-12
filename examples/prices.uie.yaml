@@ -1,0 +1,6 @@
+dataset:
+  time: date
+  entity: ticker
+  group_by: ticker           # analyse each ticker on its own instead of pooling prices
+columns:
+  close: {role: price, currency: USD}

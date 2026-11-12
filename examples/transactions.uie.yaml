@@ -1,0 +1,9 @@
+dataset:
+  time: txn_date
+  amount: amount
+  counterparty: vendor
+  thresholds: [10000]        # approval limit: test for bunching just below it
+  dedup_window_days: 3       # same amount + same vendor within 3 days = near-duplicate
+  key: [txn_id]              # default reconciliation key
+columns:
+  amount: {currency: USD}

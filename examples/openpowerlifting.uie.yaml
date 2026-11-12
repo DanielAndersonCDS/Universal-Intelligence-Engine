@@ -1,0 +1,22 @@
+# Name a semantics file <dataset>.uie.yaml next to the data and UIE picks it up automatically.
+dataset:
+  group_by: Sex            # run the detectors inside each sex (pooled lifts hide group behaviour)
+columns:
+  Squat4Kg:
+    negative_is_missing: true
+    note: negative = failed attempt
+    unit: kg
+  Bench4Kg:
+    negative_is_missing: true
+    note: negative = failed attempt
+  Deadlift4Kg:
+    negative_is_missing: true
+    note: negative = failed attempt
+  MeetID: {role: id}
+  Name: {role: entity}
+  TotalKg:
+    role: derived                       # also auto-detected as the sum of the best lifts when all three exist
+    derived_from: [BestSquatKg, BestBenchKg, BestDeadliftKg]
+  Wilks:
+    role: derived                       # a function of TotalKg, BodyweightKg and Sex
+    derived_from: [TotalKg, BodyweightKg]
