@@ -25,6 +25,9 @@ QPushButton[accent="true"] { background: @accent@; color: @accent_text@; border:
 QPushButton[accent="true"]:hover { background: @accent_hover@; color: @accent_text@; }
 QPushButton[accent="true"]:disabled { background: @border@; color: @text_dim@; }
 QCheckBox { background: transparent; spacing: 6px; }
+QCheckBox::indicator, QListView::indicator { width: 13px; height: 13px; border: 1px solid @text_dim@; background: @input_bg@; }
+QCheckBox::indicator:hover, QListView::indicator:hover { border-color: @accent@; }
+QCheckBox::indicator:checked, QListView::indicator:checked { background: @accent@; border-color: @accent@; }
 QTableView, QTableWidget { background: @panel@; alternate-background-color: @panel_alt@; gridline-color: @border@; border: 1px solid @border@; }
 QTableView::item:selected { background: @selection@; color: @selection_text@; }
 QHeaderView::section { background: @header_bg@; color: @accent@; border: none; border-right: 1px solid @border@; border-bottom: 1px solid @accent@; padding: 4px 6px; font-weight: bold; }

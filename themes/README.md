@@ -12,3 +12,6 @@ You can also drop themes in `~/.uie/themes/` so they survive app updates.
 ## Color tokens
 bg, panel, panel_alt, header_bg, border, text, text_dim, accent, accent_hover, accent_text (text drawn on accent),
 positive, negative, warning, info, selection, selection_text, input_bg.
+
+## Included
+Bloomberg Terminal, Bloomberg Blue, Bloomberg Paper, and **Pine Coze** (foggy slate and pine greys with a centre-line ochre accent; every text/background pair meets WCAG AA, most meet AAA).

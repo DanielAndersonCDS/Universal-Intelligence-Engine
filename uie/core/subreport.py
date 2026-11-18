@@ -16,6 +16,7 @@ class SubReport:
     setup_sql: list = field(default_factory=list)    # statements that recreate the views the evidence SQL uses
     provenance: dict = field(default_factory=dict)
     warnings: list = field(default_factory=list)
+    charts: dict = field(default_factory=dict)       # finding id -> (chart spec, rows), drawn by the app
 
     def worst(self):
         s = [f.severity for f in self.facts if f.active]
@@ -82,5 +83,16 @@ def tables_csv(r: SubReport, table: str | None = None) -> str:
     return buf.getvalue()
 
 
+def _json_default(o):
+    import numpy as np
+    if isinstance(o, np.floating):
+        return None if np.isnan(o) else float(o)
+    if isinstance(o, np.integer):
+        return int(o)
+    if isinstance(o, np.bool_):
+        return bool(o)
+    return str(o)
+
+
 def to_json(r: SubReport) -> str:
-    return json.dumps(r.to_dict(), indent=2, default=str)
+    return json.dumps(r.to_dict(), indent=2, default=_json_default)

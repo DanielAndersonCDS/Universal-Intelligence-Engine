@@ -23,7 +23,10 @@ def register(label, fn, groupable=False):
 
 for _mod, _label, _g in (("returns", "Returns and volatility", True), ("amounts", "Amount patterns", False),
                          ("txdupes", "Near-duplicate transactions", False), ("periods", "Period variance and gaps", True),
-                         ("leakage", "Target leakage and label balance", False), ("features", "Feature health", False)):
+                         ("leakage", "Target leakage and label balance", False), ("features", "Feature health", False),
+                         ("distributions", "Distributions", False), ("grouptests", "Group tests", False),
+                         ("association", "Nonlinear and categorical association", False), ("seasonality", "Seasonality", False),
+                         ("multivariate", "Principal components and collinearity", False)):
     try:
         _m = __import__(f"{__name__}.{_mod}", fromlist=["detect"])
     except ModuleNotFoundError as e:           # module not present yet

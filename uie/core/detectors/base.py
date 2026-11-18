@@ -19,6 +19,7 @@ class Context:
     derived: dict = field(default_factory=dict)         # derived column -> [source columns] (auto-detected or declared)
     group: dict | None = None                           # set while running inside one group
     entity: str | None = None
+    group_by: str | None = None
     notes: list = field(default_factory=list)
 
     def is_id_like(self, c: ColumnProfile) -> bool:
@@ -53,3 +54,11 @@ class Context:
 
     def col(self, name):
         return self.profile.col(name)
+
+    def sample_rows(self, cols, limit=50000):
+        """Deterministic hash sample (same rows every run) of the given column names, as a list of tuples."""
+        from ..util import qident
+        names = [c.name for c in self.profile.columns][:12]
+        mod = max(1, self.profile.rows // limit)
+        where = f"WHERE hash({', '.join(qident(n) for n in names)}) % {mod} = 0" if mod > 1 else ""
+        return self.con.execute(f"SELECT {', '.join(qident(c) for c in cols)} FROM {self.rel} {where}").fetchall()

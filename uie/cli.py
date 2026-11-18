@@ -169,6 +169,115 @@ def cmd_expect(a):
     return _sub(r, a)
 
 
+def cmd_regress(a):
+    from .core.regression import regress
+    r = regress(a.data, a.target, _csv(a.features), _cfg(a), _sem(a.semantics), a.table, a.max_levels, progress=_progress(a.quiet),
+                command="uie " + " ".join(sys.argv[1:]))
+    return _sub(r, a, csv_table="Coefficients")
+
+
+def cmd_fit(a):
+    from .core.curvefit import fit_curves
+    at = [float(v) for v in _csv(a.at)] if a.at else None
+    r = fit_curves(a.data, a.x, a.y, _cfg(a), _sem(a.semantics), a.table, at, progress=_progress(a.quiet), command="uie " + " ".join(sys.argv[1:]))
+    return _sub(r, a, csv_table="Models")
+
+
+def _kv(text):
+    out = {}
+    for part in _csv(text) or []:
+        k, _, v = part.partition("=")
+        if not _:
+            raise ValueError(f"expected key=value, got '{part}'")
+        try:
+            f = float(v)
+            out[k] = int(f) if f == int(f) else f
+        except ValueError:
+            out[k] = v
+    return out
+
+
+def _series(a, value_is=None):
+    from .core.quant.series import load_series
+    return load_series(a.data, a.time, a.value, a.entity, a.entity_value, a.table, _sem(a.semantics), a.unit, value_is or ("returns" if a.returns else "price"), progress=_progress(a.quiet))
+
+
+def _panel(a):
+    from .core.quant.series import load_panel
+    cols = _csv(a.columns)
+    return load_panel(a.data, a.time, a.value, a.entity, cols, a.table, _sem(a.semantics), a.unit, "returns" if a.returns else "price", progress=_progress(a.quiet))
+
+
+def _cmd(a):
+    return "uie " + " ".join(sys.argv[1:])
+
+
+def cmd_arima(a):
+    from .core.quant.arima import arima
+    order = tuple(int(x) for x in a.order.split(",")) if a.order else None
+    if order and len(order) != 3:
+        raise ValueError("--order must be p,d,q")
+    return _sub(arima(_series(a), order, a.max_p, a.max_q, a.horizon, a.log, _cfg(a), _progress(a.quiet), _cmd(a)), a, csv_table="Forecast")
+
+
+def cmd_garch(a):
+    from .core.quant.garch import garch
+    return _sub(garch(_series(a), horizon=a.horizon, cfg=_cfg(a), progress=_progress(a.quiet), command=_cmd(a)), a, csv_table="Parameters")
+
+
+def cmd_coint(a):
+    from .core.quant.cointegration import cointegration
+    return _sub(cointegration(_panel(a), not a.no_log, cfg=_cfg(a), progress=_progress(a.quiet), command=_cmd(a)), a, csv_table="Pairs")
+
+
+def cmd_var(a):
+    from .core.quant.risk import risk
+    conf = tuple(float(x) for x in _csv(a.confidence))
+    methods = tuple(_csv(a.methods)) + (("garch",) if a.garch and "garch" not in (_csv(a.methods) or []) else ())
+    return _sub(risk(_series(a), conf, methods, a.window, a.horizon, a.position, cfg=_cfg(a), progress=_progress(a.quiet), command=_cmd(a)), a, csv_table="VaR and ES")
+
+
+def cmd_backtest(a):
+    from .core.quant.backtest import backtest
+    s = _series(a, "price")
+    signal = None
+    if a.signal_col:
+        from .core.quant.series import load_series
+        sg = load_series(a.data, a.time, a.signal_col, a.entity, a.entity_value, a.table, _sem(a.semantics), a.unit, "returns")
+        m = dict(zip(sg.dates, sg.values))
+        signal = [m.get(d, 0.0) for d in s.dates]
+    strat = "signal" if a.signal_col else a.strategy
+    r = backtest(s, strat, _kv(a.params) or None, None, a.long_short, a.cost_bps, a.slippage_bps, a.vol_target, a.rf, a.train, a.test, a.anchored, not a.no_walk, signal, a.objective, a.boot,
+                 _cfg(a), _progress(a.quiet), _cmd(a))
+    return _sub(r, a, csv_table="Performance")
+
+
+def cmd_portfolio(a):
+    from .core.quant.portfolio import portfolio
+    return _sub(portfolio(_panel(a), tuple(_csv(a.methods)), a.rf, a.min_weight, a.max_weight, a.lookback, a.rebalance, a.cost_bps, a.stability_reps, _cfg(a), _progress(a.quiet), _cmd(a)), a, csv_table="Weights")
+
+
+def cmd_price(a):
+    from .core.quant import derivatives as D
+    if a.model == "bond":
+        r = D.price_bond(a.face, a.coupon, a.years, a.freq, a.ytm, a.bond_price)
+    else:
+        model = {"bs": "black-scholes", "binomial": "binomial", "mc": "monte-carlo"}[a.model]
+        r = D.price_option(model, a.spot, a.strike, a.years, a.rate, a.div, a.vol, a.kind, a.american, a.style, a.barrier, a.steps, a.paths)
+    return _sub(r, a, csv_table="Result")
+
+
+def cmd_options(a):
+    from .core.quant.derivatives import option_chain
+    spot = a.spot
+    try:
+        spot = float(spot)
+    except (TypeError, ValueError):
+        pass
+    r = option_chain(a.data, a.strike, a.type, a.price, a.bid, a.ask, a.expiry, a.years, spot, a.rate, a.div, a.valuation, a.table, _sem(a.semantics), _cfg(a), _progress(a.quiet), _cmd(a))
+    return _sub(r, a, csv_table="Quotes")
+
+
 def cmd_triage(a):
     from .core import triage as tri
     store = tri.TriageStore(a.store or tri.TriageStore.default_path(a.data))
@@ -262,6 +371,79 @@ def build_parser():
     common(s)
     s.set_defaults(fn=cmd_expect)
 
+    s = sub.add_parser("regress", help="OLS regression from exact SQL sufficient statistics (coefficients, CIs, VIF, residual checks)"); s.add_argument("data")
+    common(s)
+    s.add_argument("--target", required=True); s.add_argument("--features", required=True, help="comma-separated predictors (text columns become dummies)")
+    s.add_argument("--max-levels", type=int, default=10)
+    s.set_defaults(fn=cmd_regress, fail_on="never")
+
+    s = sub.add_parser("fit", help="curve fitting: linear, quadratic, cubic, exponential, power, logarithmic"); s.add_argument("data")
+    common(s)
+    s.add_argument("--x", required=True); s.add_argument("--y", required=True); s.add_argument("--at", help="comma-separated x values to predict y at")
+    s.set_defaults(fn=cmd_fit, fail_on="never")
+
+    def seriesargs(sp):
+        sp.add_argument("--time", help="time column (default: semantics or first date column)")
+        sp.add_argument("--value", help="price (or return) column (default: semantics price role, or close/price)")
+        sp.add_argument("--entity", help="entity column of a long table (ticker, symbol)"); sp.add_argument("--entity-value", help="which entity to analyse")
+        sp.add_argument("--returns", action="store_true", help="the value column already holds simple returns (decimals)")
+        sp.add_argument("--unit", choices=["day", "week", "month", "none"], default="day", help="bucket the series (last value per bucket)")
+
+    s = sub.add_parser("arima", help="ARIMA(p,d,q) with AIC order selection, forecast and out-of-sample skill vs random walk"); s.add_argument("data")
+    common(s); seriesargs(s)
+    s.add_argument("--order", help="fix p,d,q instead of selecting"); s.add_argument("--max-p", type=int, default=2); s.add_argument("--max-q", type=int, default=2)
+    s.add_argument("--horizon", type=int, default=20); s.add_argument("--log", action="store_true", help="model log prices")
+    s.set_defaults(fn=cmd_arima, fail_on="never")
+
+    s = sub.add_parser("garch", help="GARCH / GJR-GARCH (normal or t) volatility model, forecast and out-of-sample test"); s.add_argument("data")
+    common(s); seriesargs(s); s.add_argument("--horizon", type=int, default=20)
+    s.set_defaults(fn=cmd_garch, fail_on="never")
+
+    s = sub.add_parser("coint", help="Engle-Granger cointegration scan of all pairs (long: --entity/--value, wide: --columns)"); s.add_argument("data")
+    common(s); seriesargs(s); s.add_argument("--columns", help="comma-separated asset columns (wide table)"); s.add_argument("--no-log", action="store_true")
+    s.set_defaults(fn=cmd_coint, fail_on="never")
+
+    s = sub.add_parser("var", help="Value at Risk and Expected Shortfall with rolling backtests"); s.add_argument("data")
+    common(s); seriesargs(s)
+    s.add_argument("--confidence", default="0.95,0.99"); s.add_argument("--methods", default="historical,normal,t,cornish,ewma"); s.add_argument("--garch", action="store_true", help="add GARCH-filtered historical simulation (slower)")
+    s.add_argument("--window", type=int, default=500); s.add_argument("--horizon", type=int, default=1); s.add_argument("--position", type=float, help="position value, to express VaR in currency")
+    s.set_defaults(fn=cmd_var, fail_on="never")
+
+    s = sub.add_parser("backtest", help="strategy backtest with drawdown analysis, walk-forward optimisation, deflated Sharpe and bootstrap"); s.add_argument("data")
+    common(s); seriesargs(s)
+    s.add_argument("--strategy", default="sma", choices=["buyhold", "sma", "momentum", "meanrev", "rsi", "breakout"]); s.add_argument("--params", help="e.g. fast=20,slow=100")
+    s.add_argument("--signal-col", help="backtest the positions (-1..1) held in this column instead of a built-in rule")
+    s.add_argument("--long-short", action="store_true"); s.add_argument("--cost-bps", type=float, default=5.0); s.add_argument("--slippage-bps", type=float, default=0.0)
+    s.add_argument("--vol-target", type=float, help="annual volatility target, e.g. 0.10"); s.add_argument("--rf", type=float, default=0.0)
+    s.add_argument("--train", type=int, default=750); s.add_argument("--test", type=int, default=125); s.add_argument("--anchored", action="store_true")
+    s.add_argument("--no-walk", action="store_true", help="skip walk-forward"); s.add_argument("--objective", choices=["sharpe", "calmar"], default="sharpe"); s.add_argument("--boot", type=int, default=2000)
+    s.set_defaults(fn=cmd_backtest, fail_on="never")
+
+    s = sub.add_parser("portfolio", help="portfolio optimisation (min variance, max Sharpe, risk parity) with out-of-sample test"); s.add_argument("data")
+    common(s); seriesargs(s); s.add_argument("--columns", help="comma-separated asset columns (wide table)")
+    s.add_argument("--methods", default="equal,inv_vol,min_var,max_sharpe,risk_parity"); s.add_argument("--rf", type=float, default=0.0)
+    s.add_argument("--min-weight", type=float, default=0.0); s.add_argument("--max-weight", type=float, default=1.0)
+    s.add_argument("--lookback", type=int, default=252); s.add_argument("--rebalance", type=int, default=21); s.add_argument("--cost-bps", type=float, default=5.0); s.add_argument("--stability-reps", type=int, default=40)
+    s.set_defaults(fn=cmd_portfolio, fail_on="never")
+
+    s = sub.add_parser("price", help="price an option (Black-Scholes, binomial, Monte Carlo) or a bond"); s.add_argument("model", choices=["bs", "binomial", "mc", "bond"])
+    s.add_argument("--spot", type=float); s.add_argument("--strike", type=float); s.add_argument("--years", type=float, default=1.0); s.add_argument("--rate", type=float, default=0.0)
+    s.add_argument("--div", type=float, default=0.0); s.add_argument("--vol", type=float, default=0.2); s.add_argument("--kind", choices=["call", "put"], default="call")
+    s.add_argument("--american", action="store_true"); s.add_argument("--style", choices=["european", "asian", "down_out", "up_out"], default="european"); s.add_argument("--barrier", type=float)
+    s.add_argument("--steps", type=int, default=500); s.add_argument("--paths", type=int, default=200000)
+    s.add_argument("--face", type=float, default=100.0); s.add_argument("--coupon", type=float, default=0.05); s.add_argument("--freq", type=int, default=2)
+    s.add_argument("--ytm", type=float); s.add_argument("--bond-price", type=float)
+    s.add_argument("--format", choices=["text", "json", "md", "html", "csv"], default="text"); s.add_argument("-o", "--output"); s.add_argument("-q", "--quiet", action="store_true")
+    s.set_defaults(fn=cmd_price, fail_on="never")
+
+    s = sub.add_parser("options", help="option-chain diagnostics: implied vol, no-arbitrage checks, smile and term structure"); s.add_argument("data")
+    common(s)
+    s.add_argument("--strike", required=True); s.add_argument("--type", required=True, help="column holding call/put (or C/P)"); s.add_argument("--price", help="mid/last price column")
+    s.add_argument("--bid"); s.add_argument("--ask"); s.add_argument("--expiry", help="expiry date column"); s.add_argument("--years", help="column with time to expiry in years")
+    s.add_argument("--spot", required=True, help="underlying price (number) or column"); s.add_argument("--rate", type=float, default=0.0); s.add_argument("--div", type=float, default=0.0)
+    s.add_argument("--valuation", help="valuation date YYYY-MM-DD (needed with --expiry)")
+    s.set_defaults(fn=cmd_options)
+
     s = sub.add_parser("triage", help="list / dismiss / accept / restore reviewed findings"); s.add_argument("action", choices=["list", "dismiss", "accept", "restore"])
     s.add_argument("data"); s.add_argument("fingerprints", nargs="*"); s.add_argument("--note"); s.add_argument("--store", help="triage store path")
     s.set_defaults(fn=cmd_triage)
@@ -276,6 +458,8 @@ def build_parser():
 def main(argv=None) -> int:
     parser = build_parser()
     a = parser.parse_args(argv)          # argparse exits with 2 on usage errors
+    if getattr(a, "fn", None) is cmd_price and a.model != "bond" and (a.spot is None or a.strike is None):
+        parser.error("price bs|binomial|mc needs --spot and --strike")
     try:
         return int(a.fn(a))
     except FileNotFoundError as e:

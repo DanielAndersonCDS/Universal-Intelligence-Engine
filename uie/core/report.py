@@ -8,7 +8,9 @@ LABEL = {"trend": "TREND", "changepoint": "SHIFT", "correlation": "ASSOCIATION",
          "volatility": "VOLATILITY", "vol_shift": "VOL SHIFT", "return_correlation": "RETURN ASSOC", "spurious_correlation": "SPURIOUS",
          "benford": "BENFORD", "round_numbers": "ROUND NUMBERS", "threshold_bunching": "THRESHOLD", "near_duplicate_tx": "NEAR-DUP TX",
          "variance_driver": "VARIANCE", "time_gap": "TIME GAP", "target_leakage": "LEAKAGE", "leakage_missingness": "LEAKAGE",
-         "class_imbalance": "IMBALANCE", "near_constant": "NEAR-CONSTANT", "high_cardinality": "HIGH-CARD"}
+         "class_imbalance": "IMBALANCE", "near_constant": "NEAR-CONSTANT", "high_cardinality": "HIGH-CARD",
+         "distribution_fit": "DISTRIBUTION", "group_test": "GROUP TEST", "nonlinear_association": "NONLINEAR", "categorical_association": "CAT ASSOC",
+         "seasonality": "SEASONALITY", "pca": "PCA", "multicollinearity": "COLLINEAR"}
 
 
 def template_summary(sheet) -> str:

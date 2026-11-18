@@ -8,7 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import datagen
 from uie import cli
-from uie.core import expectations, stats
+from uie.core import expectations, plots, stats
+from uie.core.curvefit import fit_curves
+from uie.core.regression import regress
 from uie.core.drift import drift
 from uie.core.engine import Engine
 from uie.core.reconcile import reconcile
@@ -317,6 +319,141 @@ class CLI(unittest.TestCase):
         self.assertTrue(html_out.startswith("<!doctype html>") and "Provenance" in html_out)
         code, csv_out = self.run_cli("analyze", path, "--format", "csv", "-q", "--fail-on", "never")
         self.assertIn("fingerprint", csv_out.splitlines()[0])
+
+
+class StatsPrimitives(unittest.TestCase):
+    def test_critical_values(self):
+        self.assertAlmostEqual(stats.t_two_sided(2.228, 10), 0.05, 3)
+        self.assertAlmostEqual(stats.f_sf(3.49, 2, 20), 0.05, 3)
+        self.assertAlmostEqual(stats._t_crit(5), 2.571, 3)
+
+    def test_group_tests_and_multiple_testing(self):
+        rng = np.random.default_rng(0)
+        g = [rng.normal(m, 1, 300) for m in (0, 0, 0.6)]
+        f, d1, d2, p, eta = stats.anova_oneway([300] * 3, [x.mean() for x in g], [x.var(ddof=1) for x in g])
+        self.assertLess(p, 0.001)
+        self.assertLess(stats.kruskal(g)[2], 0.01)
+        adj = stats.bh_adjust([0.001, 0.01, 0.03, 0.5])
+        self.assertTrue(np.allclose(adj, [0.004, 0.02, 0.04, 0.5]))
+
+    def test_distribution_families_recovered(self):
+        rng = np.random.default_rng(1)
+        self.assertEqual(stats.fit_distributions(rng.normal(50, 10, 20000))[0]["dist"], "normal")
+        self.assertEqual(stats.fit_distributions(np.exp(rng.normal(3, 0.8, 20000)))[0]["dist"], "lognormal")
+        self.assertEqual(stats.fit_distributions(rng.gamma(3, 2, 20000))[0]["dist"], "gamma")
+
+    def test_ols_matches_numpy(self):
+        rng = np.random.default_rng(4)
+        n = 3000
+        X = rng.normal(size=(n, 3))
+        y = 2 + X @ np.array([1.5, -0.7, 0.0]) + rng.normal(0, 1, n)
+        Xc, yc = X - X.mean(0), y - y.mean()
+        r = stats.ols_from_gram(Xc.T @ Xc, Xc.T @ yc, yc @ yc, n, X.mean(0), y.mean(), "abc")
+        ref = np.linalg.lstsq(np.column_stack([np.ones(n), X]), y, rcond=None)[0]
+        self.assertTrue(np.allclose([r["intercept"], *r["beta"]], ref, atol=1e-8))
+
+
+class StatisticalDetectors(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.path = datagen.stats_planted(str(TMP / "stats.csv"))
+        cls.noise = datagen.pure_noise(str(TMP / "noise.csv"))
+        _, cls.sheet = analyze(cls.path)
+
+    def fact(self, type_, **match):
+        for f in self.sheet.facts:
+            if f.type == type_ and all(f.metrics.get(k) == v for k, v in match.items()):
+                return f
+        self.fail(f"no {type_} fact {match}")
+
+    def test_planted_structure_found(self):
+        self.assertEqual({self.fact("nonlinear_association").metrics["a"], self.fact("nonlinear_association").metrics["b"]}, {"x", "u"})
+        self.assertGreater(self.fact("nonlinear_association").metrics["r2_quadratic"], 0.9)
+        self.assertEqual({self.fact("categorical_association").metrics["a"], self.fact("categorical_association").metrics["b"]}, {"region", "currency"})
+        g = self.fact("group_test", measure="score", dimension="grp")
+        self.assertEqual(g.metrics["hi_group"], "C")
+        self.assertLess(g.metrics["p_adj"], 0.001)
+        d = self.fact("distribution_fit", column="skewed")
+        self.assertEqual(d.metrics["best"], "lognormal")
+        s = self.fact("seasonality")
+        self.assertEqual((s.metrics["period"], s.columns), (7, ["visits"]))
+        self.assertTrue(any(f.type == "pca" for f in self.sheet.facts))
+
+    def test_pure_noise_has_no_statistical_findings(self):
+        _, sh = analyze(self.noise)
+        bad = {"distribution_fit", "group_test", "nonlinear_association", "categorical_association", "seasonality", "pca", "multicollinearity"}
+        self.assertEqual([f.type for f in sh.facts if f.type in bad], [])
+
+
+class Regression(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        rng = np.random.default_rng(4)
+        n = 8000
+        x1, x2 = rng.normal(0, 1, n), rng.normal(0, 1, n)
+        x3 = x1 * 0.98 + rng.normal(0, 0.05, n)
+        cat = rng.choice(["a", "b", "c"], n)
+        y = 3 + 2 * x1 - 1.5 * x2 + np.where(cat == "b", 4, 0) + rng.normal(0, 1, n)
+        cx = rng.uniform(1, 10, n)
+        rows = [[round(y[i], 4), round(x1[i], 4), round(x2[i], 4), round(x3[i], 4), cat[i], round(cx[i], 4), round(3 * np.log(cx[i]) + rng.normal(0, 0.2), 4)] for i in range(n)]
+        cls.path = write_csv("reg.csv", ["y", "x1", "x2", "x3", "cat", "cx", "cy"], rows)
+
+    def test_recovers_coefficients(self):
+        r = regress(self.path, "y", ["x1", "x2", "cat"])
+        co = {row[0]: row for row in r.tables["Coefficients"][1]}
+        self.assertAlmostEqual(co["x1"][1], 2.0, delta=0.05)
+        self.assertAlmostEqual(co["x2"][1], -1.5, delta=0.05)
+        self.assertAlmostEqual(co["cat=b"][1], 4.0, delta=0.1)
+        self.assertGreater(co["cat=a"][4], 0.01)                       # the null effect is not significant
+        self.assertGreater(r.summary["R2"], 0.9)
+        self.assertTrue(any(f.type == "regress_predictor" for f in r.facts))
+
+    def test_collinearity_and_errors(self):
+        r = regress(self.path, "y", ["x1", "x2", "x3"])
+        self.assertTrue(any(f.type == "regress_warning" and "VIF" in f.metrics["message"] for f in r.facts))
+        with self.assertRaises(ValueError):
+            regress(self.path, "cat", ["x1"])
+        with self.assertRaises(ValueError):
+            regress(self.path, "y", ["nope"])
+        with self.assertRaises(ValueError):
+            regress(self.path, "y", ["x1", "x1"])                       # exactly collinear
+
+    def test_curve_fit_picks_the_planted_form(self):
+        r = fit_curves(self.path, "cx", "cy", at=[2, 50])
+        self.assertEqual(r.summary["best_model"], "logarithmic")
+        self.assertGreater(r.summary["best_r2"], r.summary["linear_r2"] + 0.05)
+        self.assertTrue(any("outside the observed range" in w for w in r.warnings))
+        self.assertEqual([row[2] for row in r.tables["Predictions"][1]], ["interpolation", "extrapolation"])
+
+
+class Plots(unittest.TestCase):
+    def test_every_chart_kind_builds(self):
+        e = Engine()
+        e.open(datagen.stats_planted(str(TMP / "plots.csv"), n=6000))
+        con = e.src.con.cursor()
+        for kind, kw in (("hist", dict(x="skewed", overlay=True)), ("qq", dict(x="skewed")), ("scatter", dict(x="x", y="u", overlay=True)),
+                         ("line", dict(x="day", y="visits")), ("acf", dict(x="day")), ("bar", dict(group="grp", y="score")),
+                         ("box", dict(group="grp", y="score")), ("heat", {})):
+            spec, rows, sql = plots.build_chart(con, kind, **kw)
+            self.assertTrue(rows and sql, kind)
+        self.assertEqual(plots.build_chart(con, "hist", x="skewed", overlay=True)[0]["fit"]["dist"], "lognormal")
+        with self.assertRaises(ValueError):
+            plots.build_chart(con, "hist", x="grp")
+
+
+class CLIStats(unittest.TestCase):
+    def test_regress_and_fit(self):
+        path = datagen.stats_planted(str(TMP / "cli_stats.csv"), n=3000)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = cli.main(["regress", path, "--target", "score", "--features", "grp", "--format", "json", "-q"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(buf.getvalue())["kind"], "regress")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = cli.main(["fit", path, "--x", "x", "--y", "u", "--format", "json", "-q"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(buf.getvalue())["summary"]["best_model"], "quadratic")
 
 
 if __name__ == "__main__":

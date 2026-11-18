@@ -120,7 +120,7 @@ class Engine:
             label = None
         ctx = Context(con=con, rel="data", profile=profile, time_col=tcol, all_text=self.src.fallback_used, cfg=cfg, sem=sem,
                       label=label, sentinel_counts=self.sentinel_counts,
-                      entity=sem.get("entity") or (sem.inferred.get("entity") or [None])[0])
+                      entity=sem.get("entity") or (sem.inferred.get("entity") or [None])[0], group_by=group_by)
         facts: list[Fact] = []
         n = len(REGISTRY)
         for i, (lab, fn) in enumerate(REGISTRY):

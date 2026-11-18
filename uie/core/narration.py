@@ -26,6 +26,10 @@ def _trend(m):
     return s + ")."
 
 
+def _a(word):
+    return ("an " if word[:1].lower() in "aeiou" else "a ") + word
+
+
 def _p(p):
     return "< 0.0001" if p < 1e-4 else f"= {p:.4f}"
 
@@ -103,6 +107,37 @@ _T = {
     "near_constant": lambda m: f"`{m['column']}` has the value {m['value']} in {pct(m['share'], 2)} of rows, so it carries almost no information.",
     "high_cardinality": lambda m: (f"`{m['column']}` has {m['distinct']:,} distinct values; {pct(m['rare_share'])} of rows belong to categories seen "
                                    f"fewer than {m['rare_count']} times. One-hot encoding will be sparse and target encoding risks leakage."),
+    # statistics
+    "distribution_fit": lambda m: (f"`{m['column']}` is not normally distributed (skewness {m['skew']:+.2f}, excess kurtosis {m['kurtosis']:.1f}); {_a(m['best'])} "
+                                   f"fit describes it best (KS distance {m['best_ks']:.3f} versus {m['normal_ks']:.3f} for normal). Mean and standard-deviation "
+                                   f"methods (z-scores, t-tests) are unreliable here; consider a log scale or rank-based tests."),
+    "group_test": lambda m: (f"`{m['measure']}` differs across `{m['dimension']}` ({m['test']}: {m['stat_name']} = {m['stat']:.2f}, adjusted p {_p(m['p_adj'])}, "
+                             f"{m['effect_name']} = {m['effect']:.2f}; Kruskal-Wallis p {_p(m['kruskal_p'])}). Highest {m['hi_group']}: {fmt_num(m['hi_mean'])}; "
+                             f"lowest {m['lo_group']}: {fmt_num(m['lo_mean'])}. Groups may also differ in other ways, so this is an association."),
+    "nonlinear_association": lambda m: (
+        f"`{m['a']}` and `{m['b']}` move together monotonically but not in a straight line (Spearman rho = {m['spearman']:+.2f} versus Pearson r = {m['pearson']:+.2f})."
+        if m["kind"] == "monotonic" else
+        f"`{m['a']}` and `{m['b']}` have a curved relationship: a quadratic fit explains {pct(m['r2_quadratic'])} of the variance versus {pct(m['r2_linear'])} "
+        f"for a straight line (Pearson r = {m['pearson']:+.2f} understates it)."),
+    "categorical_association": lambda m: (f"`{m['a']}` and `{m['b']}` are associated (Cramer's V = {m['cramers_v']:.2f}, chi-square p {_p(m['p'])}, n = {m['n']:,})"
+                                          f"{'; one may largely determine the other' if m['cramers_v'] >= 0.9 else ''}."),
+    "seasonality": lambda m: (f"{m['label']} repeats on a cycle of about {m['period']} {m['unit']}s (autocorrelation {m['acf']:.2f} at that lag; the cycle explains "
+                              f"{pct(m['strength'])} of the variation after removing {'the stochastic trend' if m['differenced'] else 'the linear trend'})."),
+    "pca": lambda m: (f"The {m['columns']} numeric columns carry about {m['components90']} independent dimensions: {m['components90']} principal components explain 90% "
+                      f"of the variance and the first explains {pct(m['pc1'])}. PC1 loads mainly on {', '.join('`' + n + '` (' + format(v, '+.2f') + ')' for n, v in m['loadings_pc1'])}."),
+    "multicollinearity": lambda m: (f"{m['count']} column(s) are strongly collinear with the others (VIF above {m['threshold']:g}): "
+                                    f"{', '.join('`' + n + '` (' + (format(v, '.0f') if v < 1e5 else 'infinite') + ')' for n, v in m['top'])}. "
+                                    f"Regression coefficients on these columns will be unstable."),
+    # regression / curve fitting (on-demand tools)
+    "regress_fit": lambda m: (f"The model explains {pct(m['r2'])} of the variance in `{m['target']}` (adjusted R-squared {m['adj_r2']:.3f}, RMSE {fmt_num(m['rmse'])}, "
+                              f"n = {m['n']:,}; F-test p {_p(m['f_p'])})."),
+    "regress_predictor": lambda m: (f"Holding the other predictors fixed, a one-unit increase in `{m['term']}` is associated with a {fmt_num(m['coef'])} change in "
+                                    f"`{m['target']}` (95% CI {fmt_num(m['ci_lo'])} to {fmt_num(m['ci_hi'])}; standardized beta {m['std_beta']:+.2f}; p {_p(m['p'])}). "
+                                    f"This is an association, not evidence of cause."),
+    "regress_warning": lambda m: m["message"],
+    "curve_fit": lambda m: (f"`{m['y']}` is best described by {_a(m['model'])} function of `{m['x']}`: {m['equation']} (R-squared {m['r2']:.3f}, "
+                            f"adjusted {m['adj_r2']:.3f}; AIC {m['delta_aic']:.1f} lower than a straight line)." if m["model"] != "linear" else
+                            f"`{m['y']}` is well described by a straight line in `{m['x']}`: {m['equation']} (R-squared {m['r2']:.3f}); no simple curve fits meaningfully better."),
     # drift / split / reconcile
     "drift": lambda m: _drift(m),
     "drift_schema": lambda m: m["message"],
@@ -134,7 +169,7 @@ def _drift(m):
 def narrate(f) -> str:
     fn = _T.get(f.type)
     try:
-        if fn is None and f.type.startswith("expect_"):
+        if fn is None and (f.type.startswith("expect_") or f.type.startswith("q_")):
             text = f.metrics["message"]
         else:
             text = fn(f.metrics) if fn else f.title

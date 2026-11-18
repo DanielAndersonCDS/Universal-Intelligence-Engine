@@ -5,7 +5,8 @@ from .profile import Profile
 
 SEV_ORDER = {"warning": 0, "notable": 1, "info": 2}
 PATTERN_TYPES = {"trend", "changepoint", "correlation", "near_duplicate", "concentration", "volatility", "vol_shift",
-                 "return_correlation", "variance_driver", "group_contrast"}
+                 "return_correlation", "variance_driver", "group_contrast", "group_test", "nonlinear_association",
+                 "categorical_association", "seasonality", "pca"}
 ANOMALY_TYPES = {"outliers", "quality_duplicates", "near_duplicate_tx", "threshold_bunching", "benford",
                  "round_numbers", "target_leakage", "leakage_missingness", "spurious_correlation", "time_gap"}
 ACTIVE = ("new", "reopened")

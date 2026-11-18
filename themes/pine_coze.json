@@ -1,0 +1,12 @@
+{
+  "id": "pine_coze",
+  "name": "Pine Coze",
+  "description": "Foggy pine forest on a wet road: slate and asphalt greys, fog-beige text, and the centre-line ochre as the one warm accent",
+  "font": { "family": "'Segoe UI', 'Inter', 'Helvetica Neue', 'DejaVu Sans', Arial, sans-serif", "size": 10 },
+  "colors": {
+    "bg": "#1B2327", "panel": "#232D32", "panel_alt": "#2C383D", "header_bg": "#1F292D", "border": "#3B4A4F",
+    "text": "#E2DACF", "text_dim": "#A2A39B", "accent": "#DDAA3F", "accent_hover": "#EEC45E", "accent_text": "#1A1F22",
+    "positive": "#8DC09A", "negative": "#E07A66", "warning": "#E8934F", "info": "#86B3BF",
+    "selection": "#3A4D52", "selection_text": "#F5F0E8", "input_bg": "#161D20"
+  }
+}

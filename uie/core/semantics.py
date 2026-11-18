@@ -28,7 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROLES = {"measure", "id", "derived", "label", "entity", "time", "amount", "counterparty", "price", "category", "ignore"}
-DETECTORS = {"outliers", "correlation", "trends", "segments", "benford", "rounding", "returns", "leakage", "all"}
+DETECTORS = {"outliers", "correlation", "trends", "segments", "benford", "rounding", "returns", "leakage", "distributions", "grouptests",
+             "association", "seasonality", "multivariate", "all"}
 # roles that keep a column out of numeric detectors
 _ROLE_EXCLUDES = {"id": {"all"}, "ignore": {"all"}, "entity": {"all"}, "time": {"all"}, "category": {"all"},
                   "label": {"outliers", "trends", "segments"}, "derived": {"correlation"}}

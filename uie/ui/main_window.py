@@ -4,12 +4,14 @@ from datetime import datetime
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QSettings
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDoubleSpinBox, QFileDialog,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDoubleSpinBox, QFileDialog, QListWidget, QListWidgetItem,
                                QFrame, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox,
                                QProgressBar, QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
                                QTextBrowser, QVBoxLayout, QWidget)
 from ..core import expectations, narrator, ollama, qa
+from ..core.curvefit import fit_curves
 from ..core.drift import drift as run_drift
+from ..core.regression import regress as run_regress
 from ..core.engine import Engine
 from ..core.reconcile import reconcile as run_reconcile
 from ..core.report import facts_csv, render_markdown, sheet_json
@@ -17,19 +19,21 @@ from ..core.splitcheck import split_check as run_split_check
 from ..core.util import fmt_num, human_bytes, human_count, pct
 from .charts import EvidenceChart
 from .exporter import write_export
+from .plotbuilder import PlotBuilder
+from .quanttab import QuantTab
 from .tools import ReportView
 from .widgets import Panel, StatTile
 from .worker import Worker
 
 FILTER = "Data (*.csv *.tsv *.txt *.parquet *.json *.jsonl *.ndjson *.xlsx *.duckdb *.db *.sqlite *.sqlite3);;All files (*)"
 SEM_FILTER = "Semantics (*.yaml *.yml *.json);;All files (*)"
-COMMANDS = ["OPEN", "RUN", "FINDINGS", "REPORT", "ASK", "PROFILE", "COMPARE", "RECONCILE", "SPLITS", "EXPECT", "SEMANTICS", "GROUP",
+COMMANDS = ["OPEN", "RUN", "FINDINGS", "REPORT", "ASK", "PROFILE", "COMPARE", "RECONCILE", "SPLITS", "EXPECT", "MODEL", "CHARTS", "QUANT", "SEMANTICS", "GROUP",
             "LABEL", "DISMISS", "ACCEPT", "RESTORE", "THEME", "EXPORT", "HELP"]
 HELP = ("OPEN [path]        load a dataset\n"
         "RUN                run analysis\n"
         "FINDINGS / REPORT / PROFILE   switch tab\n"
         "COMPARE            drift vs another dataset (PSI, KS, chi-square)\n"
-        "RECONCILE / SPLITS / EXPECT   switch tab\n"
+        "RECONCILE / SPLITS / EXPECT / MODEL / CHARTS / QUANT   switch tab\n"
         "SEMANTICS [path]   load a column semantics file (SEMANTICS none clears it)\n"
         "GROUP <col|none>   run detectors inside each group\n"
         "LABEL <col|none>   ML label column\n"
@@ -229,9 +233,30 @@ class MainWindow(QMainWindow):
         self.exp_lbl = QLabel("Expectations capture schema, null limits, value ranges, allowed categories and distributions (for PSI). Validate any later dataset against them."); self.exp_lbl.setObjectName("Dim"); self.exp_lbl.setWordWrap(True)
         row = QHBoxLayout(); row.addWidget(eb1); row.addWidget(eb2)
         self.exp_view.controls.addLayout(row); self.exp_view.controls.addWidget(self.exp_lbl)
+        # model (regression + curve fit) and charts
+        self.mod_view = ReportView(self.status, c)
+        self.tool_views.append(self.mod_view)
+        self.tab_mod = self.mod_view
+        self.mod_target = QComboBox(); self.mod_feats = QListWidget(); self.mod_feats.setMaximumHeight(110)
+        self.mod_x, self.mod_y = QComboBox(), QComboBox(); self.mod_at = QLineEdit(); self.mod_at.setPlaceholderText("Predict y at x = (comma separated, optional)")
+        rg = QPushButton("RUN REGRESSION"); rg.setProperty("accent", True); rg.clicked.connect(self.run_model)
+        cf = QPushButton("FIT CURVES"); cf.setProperty("accent", True); cf.clicked.connect(self.run_curvefit)
+        r1 = QHBoxLayout(); r1.addWidget(QLabel("OLS:")); r1.addWidget(self.mod_target, 1); r1.addWidget(rg)
+        r2 = QHBoxLayout(); r2.addWidget(QLabel("Curve:")); r2.addWidget(self.mod_x, 1); r2.addWidget(self.mod_y, 1); r2.addWidget(self.mod_at, 1); r2.addWidget(cf)
+        self.mod_view.controls.addLayout(r1); self.mod_view.controls.addWidget(self.mod_feats)
+        self.mod_view.controls.addLayout(r2)
+        hint = QLabel("Regression: pick a numeric target and tick the predictors (text columns become dummy variables). Exact least squares over all rows via SQL. "
+                      "Results are associations, not causes."); hint.setObjectName("Dim"); hint.setWordWrap(True)
+        self.mod_view.controls.addWidget(hint)
+        self.plot_builder = PlotBuilder(lambda: self.engine, self._run, self.status, c)
+        self.tool_views.append(self.plot_builder)
+        self.tab_charts = self.plot_builder
+        self.quant = QuantTab(self, c)
+        self.tool_views.append(self.quant)
+        self.tab_quant = self.quant
         for w, n in ((self.tab_find, "FINDINGS"), (self.tab_report, "REPORT"), (self.tab_ask, "ASK"),
                      (self.tab_prof, "PROFILE"), (self.tab_cmp, "COMPARE"), (self.tab_rec, "RECONCILE"),
-                     (self.tab_spl, "SPLITS"), (self.tab_exp, "EXPECT")):
+                     (self.tab_spl, "SPLITS"), (self.tab_exp, "EXPECT"), (self.tab_mod, "MODEL"), (self.tab_charts, "CHARTS"), (self.tab_quant, "QUANT")):
             self.tabs.addTab(w, n)
         return self.tabs
 
@@ -271,7 +296,7 @@ class MainWindow(QMainWindow):
         self.theme_combo.blockSignals(True); self.theme_combo.setCurrentIndex(max(i, 0)); self.theme_combo.blockSignals(False)
         self.chart.apply_theme(theme)
         c = theme["colors"]
-        for v in self.tool_views: v.colors = c
+        for v in self.tool_views: v.set_colors(c)
         self.report_view.document().setDefaultStyleSheet(
             f"h1,h2,h3 {{ color: {c['accent']}; }} code,pre {{ color: {c['info']}; }} th {{ color: {c['accent']}; }}")
         if self.sheet:
@@ -314,6 +339,17 @@ class MainWindow(QMainWindow):
             r = self.schema_tbl.rowCount(); self.schema_tbl.insertRow(r)
             self.schema_tbl.setItem(r, 0, cell(n)); self.schema_tbl.setItem(r, 1, cell(t))
         self.schema_tbl.resizeColumnToContents(0)
+        self.plot_builder.set_columns(sch)
+        self.quant.set_columns(sch, self.engine.temporal_columns(), self.engine.sem)
+        keep = self.mod_target.currentData(); self.mod_target.clear(); self.mod_target.addItem("Target: choose", None)
+        self.mod_x.clear(); self.mod_x.addItem("X: choose", None); self.mod_y.clear(); self.mod_y.addItem("Y: choose", None)
+        checked = {self.mod_feats.item(i).text() for i in range(self.mod_feats.count()) if self.mod_feats.item(i).checkState() == Qt.CheckState.Checked}
+        self.mod_feats.clear()
+        for n, t in sch:
+            self.mod_target.addItem(f"Target: {n}", n); self.mod_x.addItem(f"X: {n}", n); self.mod_y.addItem(f"Y: {n}", n)
+            it = QListWidgetItem(n); it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Checked if n in checked else Qt.CheckState.Unchecked); self.mod_feats.addItem(it)
+        i = self.mod_target.findData(keep); self.mod_target.setCurrentIndex(max(i, 0))
         self.time_combo.clear(); self.time_combo.addItem("Time column: auto", None)
         for n in self.engine.temporal_columns(): self.time_combo.addItem(f"Time column: {n}", n)
         for combo, head in ((self.group_combo, "Group by"), (self.label_combo, "Label")):
@@ -525,6 +561,25 @@ class MainWindow(QMainWindow):
                                             cfg=self.engine.cfg, sem=self.engine.sem, table_left=src.table, progress=p, command="UIE app"),
                   lambda r: self._show_tool(r, self.spl_view, self.tab_spl))
 
+    def run_model(self):
+        if not self._need_dataset(): return
+        tgt = self.mod_target.currentData()
+        feats = [self.mod_feats.item(i).text() for i in range(self.mod_feats.count()) if self.mod_feats.item(i).checkState() == Qt.CheckState.Checked and self.mod_feats.item(i).text() != tgt]
+        if not tgt or not feats: return self.status("CHOOSE A TARGET AND TICK AT LEAST ONE PREDICTOR")
+        src = self.engine.src; self._busy(True)
+        self._run(lambda p: run_regress(src.path, tgt, feats, self.engine.cfg, self.engine.sem, src.table, progress=p, command="UIE app"),
+                  lambda r: self._show_tool(r, self.mod_view, self.tab_mod))
+
+    def run_curvefit(self):
+        if not self._need_dataset(): return
+        x, y = self.mod_x.currentData(), self.mod_y.currentData()
+        if not x or not y: return self.status("CHOOSE X AND Y FOR THE CURVE FIT")
+        try: at = [float(v) for v in self._csv(self.mod_at.text())] or None
+        except ValueError: return self.status("PREDICT-AT VALUES MUST BE NUMBERS")
+        src = self.engine.src; self._busy(True)
+        self._run(lambda p: fit_curves(src.path, x, y, self.engine.cfg, self.engine.sem, src.table, at, progress=p, command="UIE app"),
+                  lambda r: self._show_tool(r, self.mod_view, self.tab_mod))
+
     def export_expectations(self):
         if not self._need_dataset(): return
         stem = Path(self.engine.src.name).stem
@@ -566,7 +621,7 @@ class MainWindow(QMainWindow):
         if not text: return
         head, _, rest = text.partition(" "); h, rest = head.upper(), rest.strip()
         tabs = {"FIND": self.tab_find, "FINDINGS": self.tab_find, "REPORT": self.tab_report, "PROFILE": self.tab_prof, "COMPARE": self.tab_cmp,
-                "RECONCILE": self.tab_rec, "SPLITS": self.tab_spl, "EXPECT": self.tab_exp}
+                "RECONCILE": self.tab_rec, "SPLITS": self.tab_spl, "EXPECT": self.tab_exp, "MODEL": self.tab_mod, "CHARTS": self.tab_charts, "QUANT": self.tab_quant}
         if h == "OPEN": self.open_dataset(rest.strip('"') or None)
         elif h in ("RUN", "GO", "ANALYZE"): self.run_analysis()
         elif h in tabs: self.tabs.setCurrentWidget(tabs[h])
